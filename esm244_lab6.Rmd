@@ -1,0 +1,167 @@
+---
+title: "ESM 244 Lab 6"
+author: "Patrick Pelegri-O'Day"
+date: "2/10/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(palmerpenguins)
+library(here)
+
+library(NbClust)
+library(cluster)
+library(factoextra)
+library(dendextend)
+library(ggdendro)
+```
+
+## Part 1: k-means clustering
+
+```{r}
+### bill length vs bill depth
+ggplot(penguins) + 
+  geom_point(aes(x = bill_length_mm, y = bill_depth_mm,
+                 color = species, shape = sex),
+             size = 3, alpha =0.7)
+```
+
+```{r}
+ggplot(penguins) + 
+  geom_point(aes(x = flipper_length_mm,
+                 y = body_mass_g,
+                 color = species, shape = sex))
+```
+
+
+Note that the variables are not on the same scale - some are orders of magnitude larger/smaller
+So let's rescale each one so that they're comparable
+```{r}
+summary(penguins)
+```
+
+Also note from the summary the NAs. We can drop them because there aren't too many
+```{r}
+penguins_complete <- penguins %>% 
+  drop_na(bill_length_mm, bill_depth_mm, body_mass_g, flipper_length_mm)
+
+penguins_scale <- penguins_complete %>% 
+  select(ends_with(c('mm', 'g'))) %>% 
+  scale()
+```
+
+### How many clusters?
+```{r}
+number_est <- NbClust(penguins_scale, min.nc = 2, max.nc = 10,
+                      method = 'kmeans')
+
+### knee method
+fviz_nbclust(penguins_scale, FUNcluster = kmeans, method = 'wss', k.max = 10)
+```
+
+### let's run some k-means
+
+```{r}
+# nstart refers to how many iterations we run
+penguins_km <- kmeans(penguins_scale, centers = 3, nstart = 25)
+penguins_km$size
+penguins_km$cluster
+penguins_km$centers
+
+penguins_cl <- data.frame(penguins_complete,
+                          cluster_number  = factor(penguins_km$cluster))
+
+ggplot(penguins_cl) + 
+  geom_point(aes(x = flipper_length_mm, y = body_mass_g, color = cluster_number, shape = species))
+
+# compare clustering to species
+penguins_cl %>% select(species, cluster_number) %>%  table()
+```
+
+## Part 2: hierarchical cluster analysis (agglomerative)
+
+```{r}
+### create distance matrix
+peng_dist <- dist(penguins_scale, method = 'euclidean')
+
+### hierarchical clustering (complete linkage)
+peng_hc_complete <- hclust(peng_dist, method = 'complete')
+
+### plot suing base plot
+plot(peng_hc_complete, cex = 0.6, hang = -1)
+```
+
+```{r}
+### cut into three clusters
+peng_cut_hc <- cutree(peng_hc_complete, 3)
+
+table(peng_cut_hc, penguins_complete$species)
+```
+
+### World Bank data - read in and simple
+
+```{r}
+wb_env <- read_csv(here('data', 'wb_env.csv'))
+```
+
+```{r}
+wb_ghg_20 <- wb_env %>% 
+  arrange(-ghg) %>% 
+  head(20) # could also use slice_map
+
+summary(wb_ghg_20) # hugely different scales; need to re-scale!
+```
+
+### scale the data
+
+```{r}
+wb_scaled <- wb_ghg_20 %>% 
+  select(3:7) %>% # we ditch the columns with characters because scale() can only scale if all numbers
+  scale()
+
+rownames(wb_scaled) <- wb_ghg_20$name
+```
+
+### Calc distance matrix
+
+```{r}
+euc_distance <- dist(wb_scaled, method = 'euclidean', diag = TRUE, upper = TRUE)
+```
+
+### do our clustering
+
+```{r}
+hc_complete <- hclust(euc_distance, method = 'complete')
+
+plot(hc_complete, cex = 0.6, hang = -1)
+```
+
+```{r}
+hc_single <- hclust(euc_distance, method = 'single')
+
+plot(hc_single, cex = 0.6, hang = -1)
+```
+
+### make a tanglegram
+
+```{r}
+### convert to class dendrogram
+dend_complete <- as.dendrogram(hc_complete)
+dend_single <- as.dendrogram(hc_single)
+
+tanglegram(dend_complete, dend_single)
+```
+
+### Make a ggplot dendrogram
+
+```{r}
+ggdendrogram(hc_complete, rotate = TRUE) +
+  theme_minimal() +
+  labs(x = 'Country', y = 'Distance')
+```
+
